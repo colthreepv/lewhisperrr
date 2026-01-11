@@ -1,0 +1,10 @@
+{
+  "name": "tg-voice-transcriber",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "grammy": "^1.35.0"
+  }
+}
