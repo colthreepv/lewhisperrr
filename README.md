@@ -1,5 +1,7 @@
 # Telegram Voice Transcriber Bot (Bun/TS + Whisper)
 
+[![pipeline status](https://gitlab.com/colthreepv/lewhisperrr/badges/main/pipeline.svg)](https://gitlab.com/colthreepv/lewhisperrr/-/pipelines)
+
 A self-hosted Telegram bot that transcribes Telegram voice notes (OGG/OPUS) to text.
 Optimized for CPU-only mini-PCs (Ryzen 3300U works fine) and deployable with Docker Compose.
 
@@ -80,6 +82,11 @@ Create `.env` (not committed):
 - Start with `small + int8`
 - Use `base + int8` if you want faster responses
 - Avoid `large` on CPU unless latency doesn’t matter
+
+## Container images
+
+- `registry.gitlab.com/colthreepv/lewhisperrr/bot:latest`
+- `registry.gitlab.com/colthreepv/lewhisperrr/asr:latest`
 
 ## Deployment
 
