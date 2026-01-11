@@ -15,6 +15,7 @@ Optimized for CPU-only mini-PCs (Ryzen 3300U works fine) and deployable with Doc
 - OGG → WAV conversion via `ffmpeg`
 - In-memory job queue with CPU-friendly concurrency
 - Safe limits (duration + file size)
+- Stats summary via `/stats`
 - Docker Compose deployment with cached models
 
 ## Phase 1 Hardening (included)
@@ -23,6 +24,12 @@ Optimized for CPU-only mini-PCs (Ryzen 3300U works fine) and deployable with Doc
 - ASR request timeout + retry
 - Max queue length with “busy” response
 - Container healthcheck for ASR
+
+## Supported media
+
+- Voice messages
+- Audio files
+- Videos (audio extracted via ffmpeg)
 
 ## Repo layout
 
@@ -61,6 +68,7 @@ Create `.env` (not committed):
 - `ASR_RETRIES` — default `2`
 - `ASR_STARTUP_RETRIES` — default `20`
 - `ASR_STARTUP_DELAY_MS` — default `1500`
+- `STATS_PATH` — default `/data/stats.json` (persist if volume mounted)
 
 ### ASR
 - `WHISPER_MODEL` — `base|small|medium|large-v3|large-v3-turbo` (default `small`)
@@ -102,6 +110,19 @@ COMPUTE_TYPE=int8
 docker compose up -d --build
 docker compose logs -f bot
 ```
+
+Stats are stored at `STATS_PATH` (default `/data/stats.json`). Mount `bot-stats` to persist across restarts.
+
+## Bot commands
+
+- `/start` — welcome message
+- `/help` — usage and supported media
+- `/stats` — performance summary
+
+## Linting
+
+- `bun run lint` (from `bot/`) uses ESLint + Antfu config.
+- `ruff check .` (from `asr/`) uses `asr/pyproject.toml`.
 
 ## ASR API
 

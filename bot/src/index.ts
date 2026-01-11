@@ -1,6 +1,7 @@
 import { Bot } from "grammy";
 import { enqueue } from "./queue";
-import { handleVoice } from "./telegram";
+import { getStatsMessage } from "./stats";
+import { handleAudio } from "./telegram";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error("Missing TELEGRAM_BOT_TOKEN");
@@ -16,11 +17,46 @@ bot.command("start", async (ctx) => {
   await ctx.reply("Hey! 👋 Send me a voice message and I’ll transcribe it for you.");
 });
 
-bot.on("message:voice", async (ctx) => {
-  const accepted = enqueue(() => handleVoice(ctx));
+bot.command("help", async (ctx) => {
+  await ctx.reply(
+    "Send a voice message, audio file, or video and I’ll transcribe it.\nCommands: /start, /help, /stats",
+  );
+});
+
+bot.command("stats", async (ctx) => {
+  const message = await getStatsMessage();
+  await ctx.reply(message);
+});
+
+const enqueueJob = async (ctx: Parameters<typeof handleAudio>[0]) => {
+  const accepted = enqueue(() => handleAudio(ctx));
   if (!accepted) {
     await ctx.reply("I am busy right now. Please try again soon.");
   }
+};
+
+bot.on("message:voice", enqueueJob);
+bot.on("message:audio", enqueueJob);
+bot.on("message:document", enqueueJob);
+bot.on("message:video", enqueueJob);
+bot.on("message:video_note", enqueueJob);
+
+bot.on("message", async (ctx) => {
+  const message = ctx.message;
+  if (!message) return;
+  if (message.text?.startsWith("/")) return;
+
+  if (
+    message.voice ||
+    message.audio ||
+    message.document ||
+    message.video ||
+    message.video_note
+  ) {
+    return;
+  }
+
+  await ctx.reply("Please send a voice message, audio file, or video.");
 });
 
 bot.catch((err) => console.error("bot error", err));

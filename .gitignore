@@ -1,0 +1,6 @@
+.env
+node_modules/
+__pycache__/
+.ruff_cache/
+/data/
+stats.json

@@ -35,6 +35,9 @@ services:
       - ASR_RETRIES=${ASR_RETRIES:-2}
       - ASR_STARTUP_RETRIES=${ASR_STARTUP_RETRIES:-20}
       - ASR_STARTUP_DELAY_MS=${ASR_STARTUP_DELAY_MS:-1500}
+      - STATS_PATH=${STATS_PATH:-/data/stats.json}
+    volumes:
+      - bot-stats:/data
     depends_on:
       asr:
         condition: service_healthy
@@ -44,3 +47,4 @@ services:
 
 volumes:
   whisper-cache:
+  bot-stats:
