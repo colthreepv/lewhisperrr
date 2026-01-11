@@ -1,7 +1,8 @@
 import os
-import time
 import tempfile
-from fastapi import FastAPI, Request, HTTPException
+import time
+
+from fastapi import FastAPI, HTTPException, Request
 from faster_whisper import WhisperModel
 
 app = FastAPI()
