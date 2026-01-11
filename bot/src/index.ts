@@ -60,6 +60,14 @@ bot.on('message', async (ctx) => {
     return
   }
 
+  const from = ctx.from
+  console.warn('interaction', {
+    userId: from?.id,
+    username: from?.username ?? null,
+    name: [from?.first_name, from?.last_name].filter(Boolean).join(' ') || null,
+    type: 'unsupported',
+  })
+
   await ctx.reply('Please send a voice message, audio file, or video.')
 })
 

@@ -26,6 +26,24 @@ export async function handleAudio(ctx: Context) {
   const video = message.video
   const videoNote = message.video_note
 
+  const from = ctx.from
+  console.warn('interaction', {
+    userId: from?.id,
+    username: from?.username ?? null,
+    name: formatName(from?.first_name, from?.last_name),
+    type: voice
+      ? 'voice'
+      : audio
+        ? 'audio'
+        : video
+          ? 'video'
+          : videoNote
+            ? 'video_note'
+            : document
+              ? 'document'
+              : 'unknown',
+  })
+
   if (!voice && !audio && !document && !video && !videoNote)
     return
 
@@ -228,6 +246,11 @@ async function recordJobSafe(update: Parameters<typeof recordJob>[0]) {
 
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function formatName(firstName?: string, lastName?: string) {
+  const parts = [firstName, lastName].filter(Boolean)
+  return parts.length ? parts.join(' ') : null
 }
 
 function isAudioOrVideoDocument(mimeType?: string, fileName?: string) {
