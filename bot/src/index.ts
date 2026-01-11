@@ -12,6 +12,10 @@ const ASR_TIMEOUT_MS = Number(process.env.ASR_TIMEOUT_MS ?? "120000");
 
 const bot = new Bot(token);
 
+bot.command("start", async (ctx) => {
+  await ctx.reply("Hey! 👋 Send me a voice message and I’ll transcribe it for you.");
+});
+
 bot.on("message:voice", async (ctx) => {
   const accepted = enqueue(() => handleVoice(ctx));
   if (!accepted) {
