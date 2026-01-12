@@ -1,5 +1,4 @@
 import os
-import os
 import tempfile
 import time
 
@@ -12,8 +11,10 @@ app = FastAPI()
 MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
 DEVICE = os.getenv("DEVICE", "cpu")
 COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "int8")
+MAX_TRANSCRIBE_WORKERS = int(os.getenv("MAX_TRANSCRIBE_WORKERS", "1"))
 
 model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
+transcribe_limiter = anyio.Semaphore(MAX_TRANSCRIBE_WORKERS)
 
 
 def _run_transcribe(path: str, language: str | None, task: str):
@@ -49,12 +50,13 @@ async def transcribe(request: Request):
         f.write(body)
         f.flush()
 
-        segments, info = await anyio.to_thread.run_sync(
-            _run_transcribe,
-            f.name,
-            language,
-            task,
-        )
+        async with transcribe_limiter:
+            segments, info = await anyio.to_thread.run_sync(
+                _run_transcribe,
+                f.name,
+                language,
+                task,
+            )
 
         text = "".join([seg.text for seg in segments]).strip()
 

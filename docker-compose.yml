@@ -6,6 +6,8 @@ services:
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
       - DEVICE=${DEVICE:-cpu}
       - COMPUTE_TYPE=${COMPUTE_TYPE:-int8}
+      - WEB_CONCURRENCY=${WEB_CONCURRENCY:-2}
+      - MAX_TRANSCRIBE_WORKERS=${MAX_TRANSCRIBE_WORKERS:-1}
     volumes:
       - whisper-cache:/root/.cache
     ports:
