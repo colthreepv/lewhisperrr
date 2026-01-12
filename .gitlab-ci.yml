@@ -9,6 +9,7 @@ variables:
 
 stages:
   - build
+  - deploy
 
 build-images:
   stage: build
@@ -23,5 +24,17 @@ build-images:
     - docker push "$CI_REGISTRY_IMAGE/bot:$CI_COMMIT_TAG"
     - docker push "$CI_REGISTRY_IMAGE/asr:latest"
     - docker push "$CI_REGISTRY_IMAGE/asr:$CI_COMMIT_TAG"
+  rules:
+    - if: $CI_COMMIT_TAG
+
+deploy-services:
+  stage: deploy
+  tags:
+    - docker
+    - personal
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker service update --with-registry-auth --image "$CI_REGISTRY_IMAGE/bot:$CI_COMMIT_TAG" lewhisperrr_bot
+    - docker service update --with-registry-auth --image "$CI_REGISTRY_IMAGE/asr:$CI_COMMIT_TAG" lewhisperrr_asr
   rules:
     - if: $CI_COMMIT_TAG

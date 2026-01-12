@@ -9,7 +9,11 @@ import { recordJob } from './stats'
 
 const ASR_URL = process.env.ASR_URL ?? 'http://asr:8000'
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
-const MAX_AUDIO_SECONDS = Number(process.env.MAX_AUDIO_SECONDS ?? '180')
+const MAX_AUDIO_SECONDS_RAW = process.env.MAX_AUDIO_SECONDS
+const MAX_AUDIO_SECONDS
+  = MAX_AUDIO_SECONDS_RAW && Number(MAX_AUDIO_SECONDS_RAW) > 0
+    ? Number(MAX_AUDIO_SECONDS_RAW)
+    : undefined
 const MAX_FILE_MB = Number(process.env.MAX_FILE_MB ?? '20')
 const LANGUAGE_HINT = (process.env.LANGUAGE_HINT ?? '').trim()
 const ASR_TIMEOUT_MS = Number(process.env.ASR_TIMEOUT_MS ?? '120000')
@@ -54,7 +58,7 @@ export async function handleAudio(ctx: Context) {
 
   const duration
     = voice?.duration ?? audio?.duration ?? video?.duration ?? videoNote?.duration
-  if (duration && duration > MAX_AUDIO_SECONDS) {
+  if (MAX_AUDIO_SECONDS && duration && duration > MAX_AUDIO_SECONDS) {
     await ctx.reply(`Too long (${duration}s). Max is ${MAX_AUDIO_SECONDS}s.`)
     return
   }

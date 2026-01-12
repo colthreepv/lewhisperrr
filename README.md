@@ -61,7 +61,7 @@ Create `.env` (not committed):
 ### Bot
 - `TELEGRAM_BOT_TOKEN` — required
 - `ASR_URL` — default `http://asr:8000`
-- `MAX_AUDIO_SECONDS` — default `180`
+- `MAX_AUDIO_SECONDS` — optional; unset = no limit; set seconds to cap
 - `MAX_FILE_MB` — default `20`
 - `LANGUAGE_HINT` — optional (empty = auto-detect)
 - `CONCURRENCY` — default `1`
@@ -98,7 +98,7 @@ TELEGRAM_BOT_TOKEN=123:abc
 ASR_URL=http://asr:8000
 WHISPER_MODEL=small
 LANGUAGE_HINT=it
-MAX_AUDIO_SECONDS=180
+# MAX_AUDIO_SECONDS=7200
 MAX_FILE_MB=20
 CONCURRENCY=1
 MAX_QUEUE=20
@@ -153,3 +153,4 @@ Response:
 - Caching by audio hash
 - Admin commands (`/status`, `/setlang`, `/setmodel`)
 - Webhook mode behind reverse proxy
+- Chunked upload/long-audio plan: `docs/plans/chunked-upload-epic.md`
