@@ -1,7 +1,9 @@
 import os
+import os
 import tempfile
 import time
 
+import anyio
 from fastapi import FastAPI, HTTPException, Request
 from faster_whisper import WhisperModel
 
@@ -12,6 +14,15 @@ DEVICE = os.getenv("DEVICE", "cpu")
 COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "int8")
 
 model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
+
+
+def _run_transcribe(path: str, language: str | None, task: str):
+    return model.transcribe(
+        path,
+        language=language or None,
+        task=task or "transcribe",
+        vad_filter=True,
+    )
 
 
 @app.get("/health")
@@ -31,15 +42,18 @@ async def transcribe(request: Request):
         raise HTTPException(status_code=400, detail="empty body")
 
     t0 = time.time()
+    language = request.query_params.get("language") or None
+    task = request.query_params.get("task") or "transcribe"
+
     with tempfile.NamedTemporaryFile(suffix=".wav") as f:
         f.write(body)
         f.flush()
 
-        segments, info = model.transcribe(
+        segments, info = await anyio.to_thread.run_sync(
+            _run_transcribe,
             f.name,
-            language=request.query_params.get("language") or None,
-            task=request.query_params.get("task") or "transcribe",
-            vad_filter=True,
+            language,
+            task,
         )
 
         text = "".join([seg.text for seg in segments]).strip()
