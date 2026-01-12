@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { oggToWav16kMono } from './audio'
-import { recordJob } from './stats'
+import { CURRENT_MODEL_KEY, getEtaForKey, recordJob } from './stats'
 
 const ASR_URL = process.env.ASR_URL ?? 'http://asr:8000'
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
@@ -85,7 +85,19 @@ export async function handleAudio(ctx: Context) {
   if (!fileId)
     return
 
-  await ctx.reply('Got it! Transcribing now...')
+  let etaMessage: string | null = null
+  try {
+    etaMessage = await getEtaForKey(CURRENT_MODEL_KEY)
+  }
+  catch (error) {
+    console.warn('eta lookup failed', error)
+  }
+
+  const intro = etaMessage
+    ? `Got it! Transcribing now... ${etaMessage}`
+    : 'Got it! Transcribing now...'
+
+  await ctx.reply(intro)
 
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'tg-asr-'))
   const jobStartedAt = Date.now()
@@ -239,9 +251,9 @@ async function fetchWithTimeout(
   }
 }
 
-async function recordJobSafe(update: Parameters<typeof recordJob>[0]) {
+async function recordJobSafe(update: Parameters<typeof recordJob>[1]) {
   try {
-    await recordJob(update)
+    await recordJob(CURRENT_MODEL_KEY, update)
   }
   catch (error) {
     console.warn('stats update failed', error)

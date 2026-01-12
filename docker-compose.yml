@@ -1,13 +1,16 @@
+x-model-env: &model_env
+  WHISPER_MODEL: ${WHISPER_MODEL:-small}
+  COMPUTE_TYPE: ${COMPUTE_TYPE:-int8}
+
 services:
   asr:
     build:
       context: ./asr
     environment:
-      - WHISPER_MODEL=${WHISPER_MODEL:-small}
-      - DEVICE=${DEVICE:-cpu}
-      - COMPUTE_TYPE=${COMPUTE_TYPE:-int8}
-      - WEB_CONCURRENCY=${WEB_CONCURRENCY:-2}
-      - MAX_TRANSCRIBE_WORKERS=${MAX_TRANSCRIBE_WORKERS:-1}
+      <<: *model_env
+      DEVICE: ${DEVICE:-cpu}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      MAX_TRANSCRIBE_WORKERS: ${MAX_TRANSCRIBE_WORKERS:-1}
     volumes:
       - whisper-cache:/root/.cache
     ports:
@@ -25,19 +28,18 @@ services:
     build:
       context: ./bot
     environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - ASR_URL=${ASR_URL:-http://asr:8000}
-      - WHISPER_MODEL=${WHISPER_MODEL:-small}
-      - LANGUAGE_HINT=${LANGUAGE_HINT:-}
-      - MAX_AUDIO_SECONDS=${MAX_AUDIO_SECONDS:-180}
-      - MAX_FILE_MB=${MAX_FILE_MB:-20}
-      - CONCURRENCY=${CONCURRENCY:-1}
-      - MAX_QUEUE=${MAX_QUEUE:-20}
-      - ASR_TIMEOUT_MS=${ASR_TIMEOUT_MS:-120000}
-      - ASR_RETRIES=${ASR_RETRIES:-2}
-      - ASR_STARTUP_RETRIES=${ASR_STARTUP_RETRIES:-20}
-      - ASR_STARTUP_DELAY_MS=${ASR_STARTUP_DELAY_MS:-1500}
-      - STATS_PATH=${STATS_PATH:-/data/stats.json}
+      <<: *model_env
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      ASR_URL: ${ASR_URL:-http://asr:8000}
+      LANGUAGE_HINT: ${LANGUAGE_HINT:-}
+      MAX_FILE_MB: ${MAX_FILE_MB:-20}
+      CONCURRENCY: ${CONCURRENCY:-1}
+      MAX_QUEUE: ${MAX_QUEUE:-20}
+      ASR_TIMEOUT_MS: ${ASR_TIMEOUT_MS:-120000}
+      ASR_RETRIES: ${ASR_RETRIES:-2}
+      ASR_STARTUP_RETRIES: ${ASR_STARTUP_RETRIES:-20}
+      ASR_STARTUP_DELAY_MS: ${ASR_STARTUP_DELAY_MS:-1500}
+      STATS_PATH: ${STATS_PATH:-/data/stats.json}
     volumes:
       - bot-stats:/data
     depends_on:
