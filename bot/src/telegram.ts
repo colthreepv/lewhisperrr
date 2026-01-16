@@ -87,14 +87,14 @@ export async function handleAudio(ctx: Context) {
 
   let etaMessage: string | null = null
   try {
-    etaMessage = await getEtaForKey(CURRENT_MODEL_KEY)
+    etaMessage = await getEtaForKey(CURRENT_MODEL_KEY, duration)
   }
   catch (error) {
     console.warn('eta lookup failed', error)
   }
 
   const intro = etaMessage
-    ? `Got it! Transcribing now... ${etaMessage}`
+    ? `Got it! ${etaMessage} Please keep waiting!`
     : 'Got it! Transcribing now...'
 
   await ctx.reply(intro)
@@ -175,6 +175,7 @@ export async function handleAudio(ctx: Context) {
         downloadMs,
         ffmpegMs,
         asrMs,
+        audioSec: duration,
       })
       await ctx.reply('No speech detected.')
       return
@@ -187,6 +188,7 @@ export async function handleAudio(ctx: Context) {
       downloadMs,
       ffmpegMs,
       asrMs,
+      audioSec: duration,
     })
   }
   catch (error) {
@@ -200,6 +202,7 @@ export async function handleAudio(ctx: Context) {
       downloadMs,
       ffmpegMs,
       asrMs,
+      audioSec: duration,
       errorMessage,
     })
     await ctx.reply('Transcription failed. Please try again later.')
