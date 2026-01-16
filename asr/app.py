@@ -12,6 +12,12 @@ MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
 DEVICE = os.getenv("DEVICE", "cpu")
 COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "int8")
 MAX_TRANSCRIBE_WORKERS = int(os.getenv("MAX_TRANSCRIBE_WORKERS", "1"))
+BEAM_SIZE_RAW = os.getenv("BEAM_SIZE")
+
+try:
+    BEAM_SIZE = int(BEAM_SIZE_RAW) if BEAM_SIZE_RAW else None
+except ValueError:
+    BEAM_SIZE = None
 
 model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
 transcribe_limiter = anyio.Semaphore(MAX_TRANSCRIBE_WORKERS)
@@ -23,6 +29,7 @@ def _run_transcribe(path: str, language: str | None, task: str):
         language=language or None,
         task=task or "transcribe",
         vad_filter=True,
+        beam_size=BEAM_SIZE,
     )
 
 
