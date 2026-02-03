@@ -1,15 +1,14 @@
-# Telegram Voice Transcriber Bot (Bun/TS + Whisper)
+# Telegram Voice Transcriber Bot (Bun/TS + ElevenLabs Scribe v2)
 
 [![pipeline status](https://gitlab.com/colthreepv/lewhisperrr/badges/main/pipeline.svg)](https://gitlab.com/colthreepv/lewhisperrr/-/pipelines)
 
 A self-hosted Telegram bot that transcribes Telegram voice notes (OGG/OPUS) to text.
-Optimized for CPU-only mini-PCs (Ryzen 3300U works fine) and deployable with Docker Compose.
+Uses ElevenLabs Speech-to-Text (Scribe v2) for fast, high-accuracy transcription.
 
 ## Architecture
 
-- **Bot (Bun + TypeScript)**: Telegram updates, download audio, queue jobs, reply to chat.
-- **ASR service (Python + FastAPI)**: `faster-whisper` for fast CPU transcription.
-- **ffmpeg**: converts OGG/OPUS to WAV 16k mono before ASR.
+- **Bot (Bun + TypeScript)**: Telegram updates, download audio, queue jobs, call ElevenLabs STT, reply to chat.
+- **ffmpeg**: converts audio/video to WAV 16k mono before upload.
 
 ## MVP Features
 
@@ -22,10 +21,10 @@ Optimized for CPU-only mini-PCs (Ryzen 3300U works fine) and deployable with Doc
 
 ## Phase 1 Hardening (included)
 
-- ASR `/health` check on startup
-- ASR request timeout + retry
+- Health endpoint in the bot
+- STT request timeout + retry
 - Max queue length with “busy” response
-- Container healthcheck for ASR
+- Container healthcheck for the bot
 
 ## Supported media
 
@@ -46,10 +45,6 @@ Optimized for CPU-only mini-PCs (Ryzen 3300U works fine) and deployable with Doc
 │  ├─ package.json
 │  ├─ tsconfig.json
 │  └─ Dockerfile
-├─ asr/
-│  ├─ app.py
-│  ├─ requirements.txt
-│  └─ Dockerfile
 ├─ docker-compose.yml
 └─ README.md
 ```
@@ -60,33 +55,25 @@ Create `.env` (not committed):
 
 ### Bot
 - `TELEGRAM_BOT_TOKEN` — required
-- `ASR_URL` — default `http://asr:8000`
+- `ELEVENLABS_API_KEY` — required
+- `ELEVENLABS_MODEL_ID` — default `scribe_v2`
+- `ELEVENLABS_TIMESTAMPS_GRANULARITY` — default `none` (`none|word|character`)
+- `ELEVENLABS_TAG_AUDIO_EVENTS` — default `false`
+- `ELEVENLABS_DIARIZE` — default `false`
+- `ELEVENLABS_NUM_SPEAKERS` — optional
 - `MAX_AUDIO_SECONDS` — optional; unset = no limit; set seconds to cap
 - `MAX_FILE_MB` — default `20`
 - `LANGUAGE_HINT` — optional (empty = auto-detect)
 - `CONCURRENCY` — default `1`
 - `MAX_QUEUE` — default `20`
-- `ASR_TIMEOUT_MS` — default `120000`
-- `ASR_RETRIES` — default `2`
-- `ASR_STARTUP_RETRIES` — default `20`
-- `ASR_STARTUP_DELAY_MS` — default `1500`
+- `ELEVENLABS_TIMEOUT_MS` — default `120000` (used for Telegram download + ElevenLabs request)
+- `ELEVENLABS_RETRIES` — default `2`
+- `HEALTH_PORT` — default `3000`
 - `STATS_PATH` — default `/data/stats.json` (persist if volume mounted)
-
-### ASR
-- `WHISPER_MODEL` — `base|small|medium|large-v3|large-v3-turbo` (default `small`)
-- `DEVICE` — `cpu` (default)
-- `COMPUTE_TYPE` — `int8` (default), `float32` (slow)
-
-## Suggested model for Ryzen 3300U
-
-- Start with `small + int8`
-- Use `base + int8` if you want faster responses
-- Avoid `large` on CPU unless latency doesn’t matter
 
 ## Container images
 
 - `registry.gitlab.com/colthreepv/lewhisperrr/bot:latest`
-- `registry.gitlab.com/colthreepv/lewhisperrr/asr:latest`
 
 ## Deployment
 
@@ -95,20 +82,16 @@ Create `.env` (not committed):
 
 ```env
 TELEGRAM_BOT_TOKEN=123:abc
-ASR_URL=http://asr:8000
-WHISPER_MODEL=small
+ELEVENLABS_API_KEY=...your key...
+ELEVENLABS_MODEL_ID=scribe_v2
 LANGUAGE_HINT=it
 # MAX_AUDIO_SECONDS=7200
 MAX_FILE_MB=20
 CONCURRENCY=1
 MAX_QUEUE=20
-ASR_TIMEOUT_MS=120000
-ASR_RETRIES=2
-ASR_STARTUP_RETRIES=20
-ASR_STARTUP_DELAY_MS=1500
-
-DEVICE=cpu
-COMPUTE_TYPE=int8
+ELEVENLABS_TIMEOUT_MS=120000
+ELEVENLABS_RETRIES=2
+HEALTH_PORT=3000
 ```
 
 3) Run:
@@ -129,22 +112,6 @@ Stats are stored at `STATS_PATH` (default `/data/stats.json`). Mount `bot-stats`
 ## Linting
 
 - `bun run lint` (from `bot/`) uses ESLint + Antfu config.
-- `ruff check .` (from `asr/`) uses `asr/pyproject.toml`.
-
-## ASR API
-
-`POST /transcribe`
-- Content-Type: `audio/wav` (raw bytes)
-- Query params: `language` (optional), `task=transcribe|translate`
-
-Response:
-```json
-{
-  "text": "...",
-  "language": "it",
-  "duration_sec": 12.3
-}
-```
 
 ## Next upgrades (optional)
 

@@ -1,55 +1,39 @@
-x-model-env: &model_env
-  WHISPER_MODEL: ${WHISPER_MODEL:-small}
-  COMPUTE_TYPE: ${COMPUTE_TYPE:-int8}
-
 services:
-  asr:
-    build:
-      context: ./asr
-    environment:
-      <<: *model_env
-      DEVICE: ${DEVICE:-cpu}
-      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
-      MAX_TRANSCRIBE_WORKERS: ${MAX_TRANSCRIBE_WORKERS:-1}
-      BEAM_SIZE: ${BEAM_SIZE:-}
-    volumes:
-      - whisper-cache:/root/.cache
-    ports:
-      - "8000:8000"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    mem_limit: 6g
-    cpus: "2.0"
-
   bot:
     build:
       context: ./bot
     environment:
-      <<: *model_env
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      ASR_URL: ${ASR_URL:-http://asr:8000}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      ELEVENLABS_MODEL_ID: ${ELEVENLABS_MODEL_ID:-scribe_v2}
+      ELEVENLABS_TIMESTAMPS_GRANULARITY: ${ELEVENLABS_TIMESTAMPS_GRANULARITY:-none}
+      ELEVENLABS_TAG_AUDIO_EVENTS: ${ELEVENLABS_TAG_AUDIO_EVENTS:-false}
+      ELEVENLABS_DIARIZE: ${ELEVENLABS_DIARIZE:-false}
+      ELEVENLABS_NUM_SPEAKERS: ${ELEVENLABS_NUM_SPEAKERS:-}
       LANGUAGE_HINT: ${LANGUAGE_HINT:-}
       MAX_FILE_MB: ${MAX_FILE_MB:-20}
       CONCURRENCY: ${CONCURRENCY:-1}
       MAX_QUEUE: ${MAX_QUEUE:-20}
-      ASR_TIMEOUT_MS: ${ASR_TIMEOUT_MS:-120000}
-      ASR_RETRIES: ${ASR_RETRIES:-2}
-      ASR_STARTUP_RETRIES: ${ASR_STARTUP_RETRIES:-20}
-      ASR_STARTUP_DELAY_MS: ${ASR_STARTUP_DELAY_MS:-1500}
+      ELEVENLABS_TIMEOUT_MS: ${ELEVENLABS_TIMEOUT_MS:-120000}
+      ELEVENLABS_RETRIES: ${ELEVENLABS_RETRIES:-2}
+      HEALTH_PORT: ${HEALTH_PORT:-3000}
       STATS_PATH: ${STATS_PATH:-/data/stats.json}
     volumes:
       - bot-stats:/data
-    depends_on:
-      asr:
-        condition: service_healthy
     restart: unless-stopped
     mem_limit: 512m
     cpus: "1.0"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:' + (process.env.HEALTH_PORT ?? '3000') + '/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
-  whisper-cache:
   bot-stats:

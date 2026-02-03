@@ -7,8 +7,14 @@ import process from 'node:process'
 import { oggToWav16kMono } from './audio'
 import { CURRENT_MODEL_KEY, getEtaForKey, recordJob } from './stats'
 
-const ASR_URL = process.env.ASR_URL ?? 'http://asr:8000'
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+const ELEVENLABS_API_KEY = (process.env.ELEVENLABS_API_KEY ?? '').trim()
+const ELEVENLABS_MODEL_ID = (process.env.ELEVENLABS_MODEL_ID ?? 'scribe_v2').trim()
+const ELEVENLABS_TAG_AUDIO_EVENTS = parseBool(process.env.ELEVENLABS_TAG_AUDIO_EVENTS, false)
+const ELEVENLABS_DIARIZE = parseBool(process.env.ELEVENLABS_DIARIZE, false)
+const ELEVENLABS_NUM_SPEAKERS_RAW = (process.env.ELEVENLABS_NUM_SPEAKERS ?? '').trim()
+const ELEVENLABS_NUM_SPEAKERS = ELEVENLABS_NUM_SPEAKERS_RAW ? Number(ELEVENLABS_NUM_SPEAKERS_RAW) : undefined
+const ELEVENLABS_TIMESTAMPS_GRANULARITY = (process.env.ELEVENLABS_TIMESTAMPS_GRANULARITY ?? 'none').trim()
 const MAX_AUDIO_SECONDS_RAW = process.env.MAX_AUDIO_SECONDS
 const MAX_AUDIO_SECONDS
   = MAX_AUDIO_SECONDS_RAW && Number(MAX_AUDIO_SECONDS_RAW) > 0
@@ -16,13 +22,16 @@ const MAX_AUDIO_SECONDS
     : undefined
 const MAX_FILE_MB = Number(process.env.MAX_FILE_MB ?? '20')
 const LANGUAGE_HINT = (process.env.LANGUAGE_HINT ?? '').trim()
-const ASR_TIMEOUT_MS = Number(process.env.ASR_TIMEOUT_MS ?? '120000')
-const ASR_RETRIES = Number(process.env.ASR_RETRIES ?? '2')
+const ELEVENLABS_TIMEOUT_MS = Number(process.env.ELEVENLABS_TIMEOUT_MS ?? '120000')
+const ELEVENLABS_RETRIES = Number(process.env.ELEVENLABS_RETRIES ?? '2')
 
 export async function handleAudio(ctx: Context) {
   const message = ctx.message
   if (!message)
     return
+
+  if (!ELEVENLABS_API_KEY)
+    throw new Error('Missing ELEVENLABS_API_KEY')
 
   const voice = message.voice
   const audio = message.audio
@@ -130,7 +139,7 @@ export async function handleAudio(ctx: Context) {
     })
 
     const downloadStart = Date.now()
-    const res = await fetchWithTimeout(url, ASR_TIMEOUT_MS)
+    const res = await fetchWithTimeout(url, ELEVENLABS_TIMEOUT_MS)
     if (!res.ok)
       throw new Error(`download failed: ${res.status}`)
     const buf = Buffer.from(await res.arrayBuffer())
@@ -141,29 +150,10 @@ export async function handleAudio(ctx: Context) {
     const wavPath = await oggToWav16kMono(inputPath, tmp)
     ffmpegMs = Date.now() - ffmpegStart
 
-    const wavBytes = await fs.readFile(wavPath)
-
-    const qp = new URLSearchParams()
-    if (LANGUAGE_HINT)
-      qp.set('language', LANGUAGE_HINT)
-
     const asrStart = Date.now()
-    const asrRes = await fetchWithRetry(
-      `${ASR_URL}/transcribe?${qp.toString()}`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'audio/wav' },
-        body: wavBytes,
-      },
-      ASR_RETRIES,
-    )
+    const out = await transcribeElevenLabs(wavPath)
     asrMs = Date.now() - asrStart
 
-    const out = (await asrRes.json()) as {
-      text: string
-      language?: string
-      duration_sec?: number
-    }
     const text = out.text?.trim()
 
     const totalMs = Date.now() - jobStartedAt
@@ -221,10 +211,10 @@ async function fetchWithRetry(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetchWithTimeout(url, ASR_TIMEOUT_MS, options)
+      const res = await fetchWithTimeout(url, ELEVENLABS_TIMEOUT_MS, options)
       if (!res.ok) {
         const t = await res.text().catch(() => '')
-        throw new Error(`ASR failed: ${res.status} ${t}`)
+        throw new Error(`STT failed: ${res.status} ${t}`)
       }
       return res
     }
@@ -296,4 +286,53 @@ function isAudioOrVideoDocument(mimeType?: string, fileName?: string) {
   }
 
   return false
+}
+
+async function transcribeElevenLabs(wavPath: string): Promise<{ text: string }> {
+  const form = new FormData()
+  form.set('model_id', ELEVENLABS_MODEL_ID)
+
+  if (LANGUAGE_HINT)
+    form.set('language_code', LANGUAGE_HINT)
+
+  form.set('timestamps_granularity', ELEVENLABS_TIMESTAMPS_GRANULARITY)
+  form.set('tag_audio_events', String(ELEVENLABS_TAG_AUDIO_EVENTS))
+  form.set('diarize', String(ELEVENLABS_DIARIZE))
+  if (Number.isFinite(ELEVENLABS_NUM_SPEAKERS as number))
+    form.set('num_speakers', String(ELEVENLABS_NUM_SPEAKERS))
+
+  // Let ElevenLabs detect the input type; we send WAV.
+  form.set('file_format', 'other')
+
+  const file = Bun.file(wavPath)
+  form.set('file', file, 'audio.wav')
+
+  const res = await fetchWithRetry(
+    'https://api.elevenlabs.io/v1/speech-to-text',
+    {
+      method: 'POST',
+      headers: {
+        'xi-api-key': ELEVENLABS_API_KEY,
+      },
+      body: form,
+    },
+    ELEVENLABS_RETRIES,
+  )
+
+  const data = (await res.json()) as any
+  const text = typeof data?.text === 'string' ? data.text : ''
+  return { text }
+}
+
+function parseBool(value: string | undefined, defaultValue: boolean) {
+  if (value === undefined)
+    return defaultValue
+  const v = value.trim().toLowerCase()
+  if (!v)
+    return defaultValue
+  if (['1', 'true', 'yes', 'y', 'on'].includes(v))
+    return true
+  if (['0', 'false', 'no', 'n', 'off'].includes(v))
+    return false
+  return defaultValue
 }

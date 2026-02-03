@@ -8,10 +8,9 @@ const token = process.env.TELEGRAM_BOT_TOKEN
 if (!token)
   throw new Error('Missing TELEGRAM_BOT_TOKEN')
 
-const ASR_URL = process.env.ASR_URL ?? 'http://asr:8000'
-const ASR_STARTUP_RETRIES = Number(process.env.ASR_STARTUP_RETRIES ?? '20')
-const ASR_STARTUP_DELAY_MS = Number(process.env.ASR_STARTUP_DELAY_MS ?? '1500')
-const ASR_TIMEOUT_MS = Number(process.env.ASR_TIMEOUT_MS ?? '120000')
+const ELEVENLABS_API_KEY = (process.env.ELEVENLABS_API_KEY ?? '').trim()
+const ELEVENLABS_MODEL_ID = (process.env.ELEVENLABS_MODEL_ID ?? 'scribe_v2').trim()
+const HEALTH_PORT = Number(process.env.HEALTH_PORT ?? process.env.PORT ?? '3000')
 
 const bot = new Bot(token)
 
@@ -74,9 +73,30 @@ bot.on('message', async (ctx) => {
 bot.catch(err => console.error('bot error', err))
 
 async function main() {
-  await waitForAsr()
+  if (!ELEVENLABS_API_KEY)
+    throw new Error('Missing ELEVENLABS_API_KEY')
+
+  const server = Bun.serve({
+    port: HEALTH_PORT,
+    fetch(req) {
+      const url = new URL(req.url)
+      if (req.method !== 'GET')
+        return new Response('Method Not Allowed', { status: 405 })
+
+      if (url.pathname === '/health') {
+        return Response.json({
+          ok: true,
+          provider: 'elevenlabs',
+          model: ELEVENLABS_MODEL_ID,
+        })
+      }
+
+      return new Response('Not Found', { status: 404 })
+    },
+  })
+
   await bot.start()
-  console.warn('bot started')
+  console.warn('bot started', { healthPort: server.port })
 
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
@@ -89,38 +109,3 @@ async function shutdown() {
 }
 
 void main()
-
-async function waitForAsr() {
-  for (let attempt = 1; attempt <= ASR_STARTUP_RETRIES; attempt++) {
-    try {
-      const res = await fetchWithTimeout(`${ASR_URL}/health`, ASR_TIMEOUT_MS)
-      if (res.ok) {
-        console.warn('ASR ready')
-        return
-      }
-      console.warn(`ASR health failed (${res.status}). Retrying...`)
-    }
-    catch (error) {
-      console.warn('ASR not ready', error)
-    }
-
-    await delay(ASR_STARTUP_DELAY_MS)
-  }
-
-  throw new Error('ASR did not become ready in time')
-}
-
-async function fetchWithTimeout(url: string, timeoutMs: number) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    return await fetch(url, { signal: controller.signal })
-  }
-  finally {
-    clearTimeout(timer)
-  }
-}
-
-function delay(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}

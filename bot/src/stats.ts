@@ -3,8 +3,7 @@ import path from 'node:path'
 import process from 'node:process'
 
 const STATS_PATH = process.env.STATS_PATH ?? '/data/stats.json'
-const MODEL_NAME = process.env.WHISPER_MODEL ?? 'small'
-const COMPUTE_TYPE = process.env.COMPUTE_TYPE ?? 'int8'
+const MODEL_NAME = (process.env.ELEVENLABS_MODEL_ID ?? 'scribe_v2').trim() || 'scribe_v2'
 
 export interface Stats {
   totalJobs: number
@@ -54,12 +53,13 @@ const defaultStatsFile: StatsFile = {
   models: {},
 }
 
-export const CURRENT_MODEL_KEY = buildModelKey(MODEL_NAME, COMPUTE_TYPE)
+export const CURRENT_MODEL_KEY = buildModelKey(`elevenlabs:${MODEL_NAME}`, '')
 
 let cachedStatsFile: StatsFile | null = null
 
 function buildModelKey(model: string, computeType: string) {
-  return `${model}|${computeType}`
+  const ct = (computeType ?? '').trim()
+  return ct ? `${model}|${ct}` : model
 }
 
 function formatModelKey(key: string) {
