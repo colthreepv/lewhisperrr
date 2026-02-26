@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { oggToWav16kMono } from './audio'
-import { CURRENT_MODEL_KEY, getEtaForKey, recordJob } from './stats'
+import { CURRENT_MODEL_KEY, getEtaForKey, getTimingHintsForKey, recordJob } from './stats'
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const ELEVENLABS_API_KEY = (process.env.ELEVENLABS_API_KEY ?? '').trim()
@@ -23,7 +23,17 @@ const MAX_AUDIO_SECONDS
 const MAX_FILE_MB = Number(process.env.MAX_FILE_MB ?? '20')
 const LANGUAGE_HINT = (process.env.LANGUAGE_HINT ?? '').trim()
 const ELEVENLABS_TIMEOUT_MS = Number(process.env.ELEVENLABS_TIMEOUT_MS ?? '120000')
+const TELEGRAM_DOWNLOAD_TIMEOUT_MS = Number(process.env.TELEGRAM_DOWNLOAD_TIMEOUT_MS ?? String(ELEVENLABS_TIMEOUT_MS))
 const ELEVENLABS_RETRIES = Number(process.env.ELEVENLABS_RETRIES ?? '2')
+const ASR_TIMEOUT_MAX_MS = Number(process.env.ASR_TIMEOUT_MAX_MS ?? '1800000')
+const DOWNLOAD_TIMEOUT_MAX_MS = Number(process.env.DOWNLOAD_TIMEOUT_MAX_MS ?? '600000')
+
+const ASR_FALLBACK_MS_PER_AUDIO_SEC = 1200
+const ASR_TIMEOUT_MULTIPLIER = 1.8
+const ASR_TIMEOUT_BUFFER_MS = 15000
+const DOWNLOAD_FALLBACK_MS_PER_MB = 1500
+const DOWNLOAD_TIMEOUT_MULTIPLIER = 1.8
+const DOWNLOAD_TIMEOUT_BUFFER_MS = 5000
 
 export async function handleAudio(ctx: Context) {
   const message = ctx.message
@@ -95,7 +105,9 @@ export async function handleAudio(ctx: Context) {
     return
 
   let etaMessage: string | null = null
+  let timingHints: Awaited<ReturnType<typeof getTimingHintsForKey>> = null
   try {
+    timingHints = await getTimingHintsForKey(CURRENT_MODEL_KEY)
     etaMessage = await getEtaForKey(CURRENT_MODEL_KEY, duration)
   }
   catch (error) {
@@ -138,8 +150,9 @@ export async function handleAudio(ctx: Context) {
       sizeMb: Number(sizeMb.toFixed(2)),
     })
 
+    const downloadTimeoutMs = estimateDownloadTimeoutMs(sizeMb, timingHints)
     const downloadStart = Date.now()
-    const res = await fetchWithTimeout(url, ELEVENLABS_TIMEOUT_MS)
+    const res = await fetchWithTimeout(url, downloadTimeoutMs)
     if (!res.ok)
       throw new Error(`download failed: ${res.status}`)
     const buf = Buffer.from(await res.arrayBuffer())
@@ -150,8 +163,9 @@ export async function handleAudio(ctx: Context) {
     const wavPath = await oggToWav16kMono(inputPath, tmp)
     ffmpegMs = Date.now() - ffmpegStart
 
+    const asrTimeoutMs = estimateAsrTimeoutMs(duration, timingHints)
     const asrStart = Date.now()
-    const out = await transcribeElevenLabs(wavPath)
+    const out = await transcribeElevenLabs(wavPath, asrTimeoutMs)
     asrMs = Date.now() - asrStart
 
     const text = out.text?.trim()
@@ -163,6 +177,7 @@ export async function handleAudio(ctx: Context) {
         success: true,
         totalMs,
         downloadMs,
+        fileSizeMb: sizeMb,
         ffmpegMs,
         asrMs,
         audioSec: duration,
@@ -176,6 +191,7 @@ export async function handleAudio(ctx: Context) {
       success: true,
       totalMs,
       downloadMs,
+      fileSizeMb: sizeMb,
       ffmpegMs,
       asrMs,
       audioSec: duration,
@@ -190,6 +206,7 @@ export async function handleAudio(ctx: Context) {
       success: false,
       totalMs,
       downloadMs,
+      fileSizeMb: sizeMb,
       ffmpegMs,
       asrMs,
       audioSec: duration,
@@ -205,13 +222,14 @@ export async function handleAudio(ctx: Context) {
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
+  timeoutMs: number,
   retries: number,
 ) {
   let lastError: unknown
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetchWithTimeout(url, ELEVENLABS_TIMEOUT_MS, options)
+      const res = await fetchWithTimeout(url, timeoutMs, options)
       if (!res.ok) {
         const t = await res.text().catch(() => '')
         throw new Error(`STT failed: ${res.status} ${t}`)
@@ -288,7 +306,7 @@ function isAudioOrVideoDocument(mimeType?: string, fileName?: string) {
   return false
 }
 
-async function transcribeElevenLabs(wavPath: string): Promise<{ text: string }> {
+async function transcribeElevenLabs(wavPath: string, timeoutMs: number): Promise<{ text: string }> {
   const form = new FormData()
   form.set('model_id', ELEVENLABS_MODEL_ID)
 
@@ -316,6 +334,7 @@ async function transcribeElevenLabs(wavPath: string): Promise<{ text: string }> 
       },
       body: form,
     },
+    timeoutMs,
     ELEVENLABS_RETRIES,
   )
 
@@ -335,4 +354,58 @@ function parseBool(value: string | undefined, defaultValue: boolean) {
   if (['0', 'false', 'no', 'n', 'off'].includes(v))
     return false
   return defaultValue
+}
+
+function estimateAsrTimeoutMs(
+  audioSec: number | undefined,
+  hints: Awaited<ReturnType<typeof getTimingHintsForKey>>,
+) {
+  const fallbackRate = ASR_FALLBACK_MS_PER_AUDIO_SEC
+  const learnedRate
+    = hints && hints.asrRateJobs > 0 && hints.avgAsrMsPerAudioSec > 0
+      ? hints.avgAsrMsPerAudioSec
+      : fallbackRate
+
+  if (!audioSec || audioSec <= 0)
+    return ELEVENLABS_TIMEOUT_MS
+
+  const estimatedMs
+    = (audioSec * learnedRate * ASR_TIMEOUT_MULTIPLIER) + ASR_TIMEOUT_BUFFER_MS
+
+  return clampTimeout(
+    Math.max(ELEVENLABS_TIMEOUT_MS, estimatedMs),
+    ELEVENLABS_TIMEOUT_MS,
+    ASR_TIMEOUT_MAX_MS,
+  )
+}
+
+function estimateDownloadTimeoutMs(
+  fileSizeMb: number,
+  hints: Awaited<ReturnType<typeof getTimingHintsForKey>>,
+) {
+  const fallbackRate = DOWNLOAD_FALLBACK_MS_PER_MB
+  const learnedRate
+    = hints && hints.downloadRateJobs > 0 && hints.avgDownloadMsPerMb > 0
+      ? hints.avgDownloadMsPerMb
+      : fallbackRate
+
+  if (!Number.isFinite(fileSizeMb) || fileSizeMb <= 0)
+    return TELEGRAM_DOWNLOAD_TIMEOUT_MS
+
+  const estimatedMs
+    = (fileSizeMb * learnedRate * DOWNLOAD_TIMEOUT_MULTIPLIER) + DOWNLOAD_TIMEOUT_BUFFER_MS
+
+  return clampTimeout(
+    Math.max(TELEGRAM_DOWNLOAD_TIMEOUT_MS, estimatedMs),
+    TELEGRAM_DOWNLOAD_TIMEOUT_MS,
+    DOWNLOAD_TIMEOUT_MAX_MS,
+  )
+}
+
+function clampTimeout(value: number, min: number, max: number) {
+  const safeMin = Number.isFinite(min) && min > 0 ? min : 120000
+  const safeMax = Number.isFinite(max) && max > safeMin ? max : safeMin
+  if (!Number.isFinite(value))
+    return safeMin
+  return Math.min(Math.max(value, safeMin), safeMax)
 }

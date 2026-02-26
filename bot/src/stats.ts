@@ -11,6 +11,8 @@ export interface Stats {
   failedJobs: number
   avgTotalMs: number
   avgDownloadMs: number
+  avgDownloadMsPerMb: number
+  downloadRateJobs: number
   avgFfmpegMs: number
   avgAsrMs: number
   avgAsrMsPerAudioSec: number
@@ -28,6 +30,7 @@ interface JobUpdate {
   success: boolean
   totalMs?: number
   downloadMs?: number
+  fileSizeMb?: number
   ffmpegMs?: number
   asrMs?: number
   audioSec?: number
@@ -40,6 +43,8 @@ const defaultStats: Stats = {
   failedJobs: 0,
   avgTotalMs: 0,
   avgDownloadMs: 0,
+  avgDownloadMsPerMb: 0,
+  downloadRateJobs: 0,
   avgFfmpegMs: 0,
   avgAsrMs: 0,
   avgAsrMsPerAudioSec: 0,
@@ -126,6 +131,14 @@ function clampAudioSeconds(value: number) {
   return value
 }
 
+function clampFileSizeMb(value: number) {
+  if (!Number.isFinite(value))
+    return null
+  if (value <= 0)
+    return null
+  return value
+}
+
 function ensureModel(statsFile: StatsFile, modelKey: string) {
   if (!statsFile.models[modelKey])
     statsFile.models[modelKey] = normalizeStats(undefined)
@@ -159,6 +172,19 @@ export async function recordJob(modelKey: string, update: JobUpdate) {
       stats.totalJobs,
       update.downloadMs,
     )
+
+    if (update.fileSizeMb !== undefined) {
+      const fileSizeMb = clampFileSizeMb(update.fileSizeMb)
+      if (fileSizeMb !== null) {
+        const rateMs = update.downloadMs / fileSizeMb
+        stats.downloadRateJobs += 1
+        stats.avgDownloadMsPerMb = updateAverage(
+          stats.avgDownloadMsPerMb,
+          stats.downloadRateJobs,
+          rateMs,
+        )
+      }
+    }
   }
 
   if (update.ffmpegMs !== undefined)
@@ -193,7 +219,7 @@ export async function getStatsMessage() {
   const sections = entries.map(([key, stats]) => {
     const lines = [
       `${formatModelKey(key)}: ${stats.totalJobs} total, ${stats.successJobs} ok, ${stats.failedJobs} failed`,
-      `Avg: total ${formatMs(stats.avgTotalMs)}, download ${formatMs(stats.avgDownloadMs)}, ffmpeg ${formatMs(stats.avgFfmpegMs)}, asr ${formatMs(stats.avgAsrMs)}, asr/sec ${formatMs(stats.avgAsrMsPerAudioSec)}`,
+      `Avg: total ${formatMs(stats.avgTotalMs)}, download ${formatMs(stats.avgDownloadMs)} (${formatMs(stats.avgDownloadMsPerMb)}/MB), ffmpeg ${formatMs(stats.avgFfmpegMs)}, asr ${formatMs(stats.avgAsrMs)}, asr/sec ${formatMs(stats.avgAsrMsPerAudioSec)}`,
       `Last job: ${stats.lastJobAt ?? 'n/a'}`,
     ]
 
@@ -220,6 +246,21 @@ export async function getEtaForKey(modelKey: string, audioSec?: number) {
   }
 
   return `Recent average for ${formatModelKey(modelKey)}: ~${formatMs(stats.avgAsrMs)} (${stats.totalJobs} jobs)`
+}
+
+export async function getTimingHintsForKey(modelKey: string) {
+  const statsFile = await loadStatsFile()
+  const stats = statsFile.models[modelKey]
+
+  if (!stats)
+    return null
+
+  return {
+    avgAsrMsPerAudioSec: stats.avgAsrMsPerAudioSec,
+    asrRateJobs: stats.asrRateJobs,
+    avgDownloadMsPerMb: stats.avgDownloadMsPerMb,
+    downloadRateJobs: stats.downloadRateJobs,
+  }
 }
 
 export function getCurrentModelKey() {

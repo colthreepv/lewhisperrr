@@ -66,7 +66,10 @@ Create `.env` (not committed):
 - `LANGUAGE_HINT` — optional (empty = auto-detect)
 - `CONCURRENCY` — default `1`
 - `MAX_QUEUE` — default `20`
-- `ELEVENLABS_TIMEOUT_MS` — default `120000` (used for Telegram download + ElevenLabs request)
+- `ELEVENLABS_TIMEOUT_MS` — default `120000` (minimum/base timeout for ASR requests)
+- `TELEGRAM_DOWNLOAD_TIMEOUT_MS` — default `120000` (minimum/base timeout for Telegram file download)
+- `ASR_TIMEOUT_MAX_MS` — default `1800000` (cap for duration-aware ASR timeout)
+- `DOWNLOAD_TIMEOUT_MAX_MS` — default `600000` (cap for size-aware download timeout)
 - `ELEVENLABS_RETRIES` — default `2`
 - `HEALTH_PORT` — default `3000`
 - `STATS_PATH` — default `/data/stats.json` (persist if volume mounted)
@@ -90,6 +93,9 @@ MAX_FILE_MB=20
 CONCURRENCY=1
 MAX_QUEUE=20
 ELEVENLABS_TIMEOUT_MS=120000
+TELEGRAM_DOWNLOAD_TIMEOUT_MS=120000
+ASR_TIMEOUT_MAX_MS=1800000
+DOWNLOAD_TIMEOUT_MAX_MS=600000
 ELEVENLABS_RETRIES=2
 HEALTH_PORT=3000
 ```
