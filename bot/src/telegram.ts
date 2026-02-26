@@ -9,24 +9,13 @@ import { CURRENT_MODEL_KEY, getEtaForKey, getTimingHintsForKey, recordJob } from
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const ELEVENLABS_API_KEY = (process.env.ELEVENLABS_API_KEY ?? '').trim()
-const ELEVENLABS_MODEL_ID = (process.env.ELEVENLABS_MODEL_ID ?? 'scribe_v2').trim()
-const ELEVENLABS_TAG_AUDIO_EVENTS = parseBool(process.env.ELEVENLABS_TAG_AUDIO_EVENTS, false)
-const ELEVENLABS_DIARIZE = parseBool(process.env.ELEVENLABS_DIARIZE, false)
-const ELEVENLABS_NUM_SPEAKERS_RAW = (process.env.ELEVENLABS_NUM_SPEAKERS ?? '').trim()
-const ELEVENLABS_NUM_SPEAKERS = ELEVENLABS_NUM_SPEAKERS_RAW ? Number(ELEVENLABS_NUM_SPEAKERS_RAW) : undefined
-const ELEVENLABS_TIMESTAMPS_GRANULARITY = (process.env.ELEVENLABS_TIMESTAMPS_GRANULARITY ?? 'none').trim()
-const MAX_AUDIO_SECONDS_RAW = process.env.MAX_AUDIO_SECONDS
-const MAX_AUDIO_SECONDS
-  = MAX_AUDIO_SECONDS_RAW && Number(MAX_AUDIO_SECONDS_RAW) > 0
-    ? Number(MAX_AUDIO_SECONDS_RAW)
-    : undefined
-const MAX_FILE_MB = Number(process.env.MAX_FILE_MB ?? '20')
-const LANGUAGE_HINT = (process.env.LANGUAGE_HINT ?? '').trim()
-const ELEVENLABS_TIMEOUT_MS = Number(process.env.ELEVENLABS_TIMEOUT_MS ?? '120000')
-const TELEGRAM_DOWNLOAD_TIMEOUT_MS = Number(process.env.TELEGRAM_DOWNLOAD_TIMEOUT_MS ?? String(ELEVENLABS_TIMEOUT_MS))
-const ELEVENLABS_RETRIES = Number(process.env.ELEVENLABS_RETRIES ?? '2')
-const ASR_TIMEOUT_MAX_MS = Number(process.env.ASR_TIMEOUT_MAX_MS ?? '1800000')
-const DOWNLOAD_TIMEOUT_MAX_MS = Number(process.env.DOWNLOAD_TIMEOUT_MAX_MS ?? '600000')
+const ELEVENLABS_MODEL_ID = 'scribe_v2'
+const MAX_FILE_MB = 20
+const ASR_TIMEOUT_BASE_MS = 120000
+const TELEGRAM_DOWNLOAD_TIMEOUT_BASE_MS = 120000
+const ELEVENLABS_RETRIES = 2
+const ASR_TIMEOUT_MAX_MS = 1800000
+const DOWNLOAD_TIMEOUT_MAX_MS = 600000
 
 const ASR_FALLBACK_MS_PER_AUDIO_SEC = 1200
 const ASR_TIMEOUT_MULTIPLIER = 1.8
@@ -34,6 +23,7 @@ const ASR_TIMEOUT_BUFFER_MS = 15000
 const DOWNLOAD_FALLBACK_MS_PER_MB = 1500
 const DOWNLOAD_TIMEOUT_MULTIPLIER = 1.8
 const DOWNLOAD_TIMEOUT_BUFFER_MS = 5000
+const TELEGRAM_MESSAGE_MAX_CHARS = 3900
 
 export async function handleAudio(ctx: Context) {
   const message = ctx.message
@@ -77,10 +67,6 @@ export async function handleAudio(ctx: Context) {
 
   const duration
     = voice?.duration ?? audio?.duration ?? video?.duration ?? videoNote?.duration
-  if (MAX_AUDIO_SECONDS && duration && duration > MAX_AUDIO_SECONDS) {
-    await ctx.reply(`Too long (${duration}s). Max is ${MAX_AUDIO_SECONDS}s.`)
-    return
-  }
 
   const fileSize
     = voice?.file_size
@@ -105,7 +91,12 @@ export async function handleAudio(ctx: Context) {
     return
 
   let etaMessage: string | null = null
-  let timingHints: Awaited<ReturnType<typeof getTimingHintsForKey>> = null
+  let timingHints: Awaited<ReturnType<typeof getTimingHintsForKey>> = {
+    avgAsrMsPerAudioSec: 0,
+    asrRateJobs: 0,
+    avgDownloadMsPerMb: 0,
+    downloadRateJobs: 0,
+  }
   try {
     timingHints = await getTimingHintsForKey(CURRENT_MODEL_KEY)
     etaMessage = await getEtaForKey(CURRENT_MODEL_KEY, duration)
@@ -186,7 +177,7 @@ export async function handleAudio(ctx: Context) {
       return
     }
 
-    await ctx.reply(text)
+    await replyTextInChunks(ctx, text)
     await recordJobSafe({
       success: true,
       totalMs,
@@ -310,18 +301,6 @@ async function transcribeElevenLabs(wavPath: string, timeoutMs: number): Promise
   const form = new FormData()
   form.set('model_id', ELEVENLABS_MODEL_ID)
 
-  if (LANGUAGE_HINT)
-    form.set('language_code', LANGUAGE_HINT)
-
-  form.set('timestamps_granularity', ELEVENLABS_TIMESTAMPS_GRANULARITY)
-  form.set('tag_audio_events', String(ELEVENLABS_TAG_AUDIO_EVENTS))
-  form.set('diarize', String(ELEVENLABS_DIARIZE))
-  if (Number.isFinite(ELEVENLABS_NUM_SPEAKERS as number))
-    form.set('num_speakers', String(ELEVENLABS_NUM_SPEAKERS))
-
-  // Let ElevenLabs detect the input type; we send WAV.
-  form.set('file_format', 'other')
-
   const file = Bun.file(wavPath)
   form.set('file', file, 'audio.wav')
 
@@ -343,19 +322,6 @@ async function transcribeElevenLabs(wavPath: string, timeoutMs: number): Promise
   return { text }
 }
 
-function parseBool(value: string | undefined, defaultValue: boolean) {
-  if (value === undefined)
-    return defaultValue
-  const v = value.trim().toLowerCase()
-  if (!v)
-    return defaultValue
-  if (['1', 'true', 'yes', 'y', 'on'].includes(v))
-    return true
-  if (['0', 'false', 'no', 'n', 'off'].includes(v))
-    return false
-  return defaultValue
-}
-
 function estimateAsrTimeoutMs(
   audioSec: number | undefined,
   hints: Awaited<ReturnType<typeof getTimingHintsForKey>>,
@@ -367,14 +333,14 @@ function estimateAsrTimeoutMs(
       : fallbackRate
 
   if (!audioSec || audioSec <= 0)
-    return ELEVENLABS_TIMEOUT_MS
+    return ASR_TIMEOUT_BASE_MS
 
   const estimatedMs
     = (audioSec * learnedRate * ASR_TIMEOUT_MULTIPLIER) + ASR_TIMEOUT_BUFFER_MS
 
   return clampTimeout(
-    Math.max(ELEVENLABS_TIMEOUT_MS, estimatedMs),
-    ELEVENLABS_TIMEOUT_MS,
+    Math.max(ASR_TIMEOUT_BASE_MS, estimatedMs),
+    ASR_TIMEOUT_BASE_MS,
     ASR_TIMEOUT_MAX_MS,
   )
 }
@@ -390,14 +356,14 @@ function estimateDownloadTimeoutMs(
       : fallbackRate
 
   if (!Number.isFinite(fileSizeMb) || fileSizeMb <= 0)
-    return TELEGRAM_DOWNLOAD_TIMEOUT_MS
+    return TELEGRAM_DOWNLOAD_TIMEOUT_BASE_MS
 
   const estimatedMs
     = (fileSizeMb * learnedRate * DOWNLOAD_TIMEOUT_MULTIPLIER) + DOWNLOAD_TIMEOUT_BUFFER_MS
 
   return clampTimeout(
-    Math.max(TELEGRAM_DOWNLOAD_TIMEOUT_MS, estimatedMs),
-    TELEGRAM_DOWNLOAD_TIMEOUT_MS,
+    Math.max(TELEGRAM_DOWNLOAD_TIMEOUT_BASE_MS, estimatedMs),
+    TELEGRAM_DOWNLOAD_TIMEOUT_BASE_MS,
     DOWNLOAD_TIMEOUT_MAX_MS,
   )
 }
@@ -408,4 +374,43 @@ function clampTimeout(value: number, min: number, max: number) {
   if (!Number.isFinite(value))
     return safeMin
   return Math.min(Math.max(value, safeMin), safeMax)
+}
+
+async function replyTextInChunks(ctx: Context, text: string) {
+  const chunks = splitForTelegram(text, TELEGRAM_MESSAGE_MAX_CHARS)
+  for (const chunk of chunks)
+    await ctx.reply(chunk)
+}
+
+function splitForTelegram(text: string, maxChars: number) {
+  const safeMax = Number.isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : 3900
+  const input = text.replace(/\r\n/g, '\n')
+  const chunks: string[] = []
+  let rest = input
+
+  while (rest.length > safeMax) {
+    const slice = rest.slice(0, safeMax)
+    const cut = findSplitPoint(slice, safeMax)
+    const chunk = rest.slice(0, cut).trimEnd()
+    if (chunk)
+      chunks.push(chunk)
+    rest = rest.slice(cut).trimStart()
+  }
+
+  if (rest)
+    chunks.push(rest)
+
+  return chunks.length ? chunks : ['']
+}
+
+function findSplitPoint(slice: string, maxChars: number) {
+  const minPreferred = Math.floor(maxChars * 0.6)
+  const candidates = [slice.lastIndexOf('\n\n'), slice.lastIndexOf('\n'), slice.lastIndexOf(' ')]
+
+  for (const idx of candidates) {
+    if (idx >= minPreferred)
+      return idx + 1
+  }
+
+  return maxChars
 }

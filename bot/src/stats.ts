@@ -1,9 +1,8 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import process from 'node:process'
 
-const STATS_PATH = process.env.STATS_PATH ?? '/data/stats.json'
-const MODEL_NAME = (process.env.ELEVENLABS_MODEL_ID ?? 'scribe_v2').trim() || 'scribe_v2'
+const STATS_PATH = '/data/stats.json'
+const MODEL_NAME = 'scribe_v2'
 
 export interface Stats {
   totalJobs: number
@@ -22,8 +21,14 @@ export interface Stats {
 }
 
 interface StatsFile {
+  version: 2
+  model: string
+  stats: Stats
+}
+
+interface LegacyStatsFileV1 {
   version: 1
-  models: Record<string, Stats>
+  models: Record<string, Partial<Stats>>
 }
 
 interface JobUpdate {
@@ -53,31 +58,16 @@ const defaultStats: Stats = {
   lastJobAt: null,
 }
 
-const defaultStatsFile: StatsFile = {
-  version: 1,
-  models: {},
-}
-
-export const CURRENT_MODEL_KEY = buildModelKey(`elevenlabs:${MODEL_NAME}`, '')
+export const CURRENT_MODEL_KEY = `elevenlabs:${MODEL_NAME}`
 
 let cachedStatsFile: StatsFile | null = null
-
-function buildModelKey(model: string, computeType: string) {
-  const ct = (computeType ?? '').trim()
-  return ct ? `${model}|${ct}` : model
-}
-
-function formatModelKey(key: string) {
-  const [model, compute] = key.split('|')
-  return compute ? `${model} (${compute})` : model
-}
 
 function normalizeStats(input: Partial<Stats> | undefined) {
   return { ...defaultStats, ...(input ?? {}) }
 }
 
-function isLegacyStats(raw: unknown): raw is Stats {
-  return !!raw && typeof raw === 'object' && 'totalJobs' in raw
+function isStats(input: unknown): input is Partial<Stats> {
+  return !!input && typeof input === 'object' && 'totalJobs' in input
 }
 
 async function loadStatsFile() {
@@ -88,21 +78,41 @@ async function loadStatsFile() {
     const raw = await fs.readFile(STATS_PATH, 'utf8')
     const parsed = JSON.parse(raw) as unknown
 
-    if (parsed && typeof parsed === 'object' && 'models' in parsed) {
-      const file = parsed as StatsFile
-      const models: Record<string, Stats> = {}
-      for (const [key, value] of Object.entries(file.models ?? {})) {
-        models[key] = normalizeStats(value as Partial<Stats>)
+    if (parsed && typeof parsed === 'object' && 'version' in parsed) {
+      const withVersion = parsed as { version?: number }
+
+      if (withVersion.version === 2) {
+        const v2 = parsed as Partial<StatsFile>
+        if (isStats(v2.stats)) {
+          cachedStatsFile = {
+            version: 2,
+            model: typeof v2.model === 'string' && v2.model ? v2.model : CURRENT_MODEL_KEY,
+            stats: normalizeStats(v2.stats),
+          }
+          return cachedStatsFile
+        }
       }
-      cachedStatsFile = { version: 1, models }
-      return cachedStatsFile
+
+      if (withVersion.version === 1 && 'models' in (parsed as any)) {
+        const v1 = parsed as LegacyStatsFileV1
+        const current = v1.models?.[CURRENT_MODEL_KEY]
+        cachedStatsFile = {
+          version: 2,
+          model: CURRENT_MODEL_KEY,
+          stats: normalizeStats(isStats(current) ? current : undefined),
+        }
+        await saveStatsFile(cachedStatsFile)
+        return cachedStatsFile
+      }
     }
 
-    if (isLegacyStats(parsed)) {
+    if (isStats(parsed)) {
       cachedStatsFile = {
-        version: 1,
-        models: { [CURRENT_MODEL_KEY]: normalizeStats(parsed) },
+        version: 2,
+        model: CURRENT_MODEL_KEY,
+        stats: normalizeStats(parsed),
       }
+      await saveStatsFile(cachedStatsFile)
       return cachedStatsFile
     }
   }
@@ -110,7 +120,11 @@ async function loadStatsFile() {
     // ignore and fall through to default
   }
 
-  cachedStatsFile = { ...defaultStatsFile }
+  cachedStatsFile = {
+    version: 2,
+    model: CURRENT_MODEL_KEY,
+    stats: normalizeStats(undefined),
+  }
   return cachedStatsFile
 }
 
@@ -139,16 +153,9 @@ function clampFileSizeMb(value: number) {
   return value
 }
 
-function ensureModel(statsFile: StatsFile, modelKey: string) {
-  if (!statsFile.models[modelKey])
-    statsFile.models[modelKey] = normalizeStats(undefined)
-}
-
-export async function recordJob(modelKey: string, update: JobUpdate) {
+export async function recordJob(_modelKey: string, update: JobUpdate) {
   const statsFile = await loadStatsFile()
-  ensureModel(statsFile, modelKey)
-
-  const stats = statsFile.models[modelKey]
+  const stats = statsFile.stats
 
   stats.totalJobs += 1
   stats.lastJobAt = new Date().toISOString()
@@ -211,32 +218,28 @@ export async function recordJob(modelKey: string, update: JobUpdate) {
 
 export async function getStatsMessage() {
   const statsFile = await loadStatsFile()
-  const entries = Object.entries(statsFile.models).filter(([, stats]) => stats.totalJobs > 0)
+  const stats = statsFile.stats
 
-  if (!entries.length)
+  if (!stats.totalJobs)
     return 'No transcriptions yet. Send a voice, audio, or video message.'
 
-  const sections = entries.map(([key, stats]) => {
-    const lines = [
-      `${formatModelKey(key)}: ${stats.totalJobs} total, ${stats.successJobs} ok, ${stats.failedJobs} failed`,
-      `Avg: total ${formatMs(stats.avgTotalMs)}, download ${formatMs(stats.avgDownloadMs)} (${formatMs(stats.avgDownloadMsPerMb)}/MB), ffmpeg ${formatMs(stats.avgFfmpegMs)}, asr ${formatMs(stats.avgAsrMs)}, asr/sec ${formatMs(stats.avgAsrMsPerAudioSec)}`,
-      `Last job: ${stats.lastJobAt ?? 'n/a'}`,
-    ]
+  const lines = [
+    `${stats.totalJobs} total, ${stats.successJobs} ok, ${stats.failedJobs} failed`,
+    `Avg: total ${formatMs(stats.avgTotalMs)}, download ${formatMs(stats.avgDownloadMs)} (${formatMs(stats.avgDownloadMsPerMb)}/MB), ffmpeg ${formatMs(stats.avgFfmpegMs)}, asr ${formatMs(stats.avgAsrMs)}, asr/sec ${formatMs(stats.avgAsrMsPerAudioSec)}`,
+    `Last job: ${stats.lastJobAt ?? 'n/a'}`,
+  ]
 
-    if (stats.lastError)
-      lines.push(`Last error: ${stats.lastError}`)
+  if (stats.lastError)
+    lines.push(`Last error: ${stats.lastError}`)
 
-    return lines.join('\n')
-  })
-
-  return sections.join('\n\n')
+  return lines.join('\n')
 }
 
-export async function getEtaForKey(modelKey: string, audioSec?: number) {
+export async function getEtaForKey(_modelKey: string, audioSec?: number) {
   const statsFile = await loadStatsFile()
-  const stats = statsFile.models[modelKey]
+  const stats = statsFile.stats
 
-  if (!stats || stats.totalJobs === 0)
+  if (!stats.totalJobs)
     return null
 
   const safeAudioSec = audioSec ? clampAudioSeconds(audioSec) : null
@@ -245,15 +248,12 @@ export async function getEtaForKey(modelKey: string, audioSec?: number) {
     return `Estimated time: ${formatMs(estimatedMs)}`
   }
 
-  return `Recent average for ${formatModelKey(modelKey)}: ~${formatMs(stats.avgAsrMs)} (${stats.totalJobs} jobs)`
+  return `Recent average: ~${formatMs(stats.avgAsrMs)} (${stats.totalJobs} jobs)`
 }
 
-export async function getTimingHintsForKey(modelKey: string) {
+export async function getTimingHintsForKey(_modelKey: string) {
   const statsFile = await loadStatsFile()
-  const stats = statsFile.models[modelKey]
-
-  if (!stats)
-    return null
+  const stats = statsFile.stats
 
   return {
     avgAsrMsPerAudioSec: stats.avgAsrMsPerAudioSec,

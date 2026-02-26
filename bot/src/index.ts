@@ -9,8 +9,8 @@ if (!token)
   throw new Error('Missing TELEGRAM_BOT_TOKEN')
 
 const ELEVENLABS_API_KEY = (process.env.ELEVENLABS_API_KEY ?? '').trim()
-const ELEVENLABS_MODEL_ID = (process.env.ELEVENLABS_MODEL_ID ?? 'scribe_v2').trim()
-const HEALTH_PORT = Number(process.env.HEALTH_PORT ?? process.env.PORT ?? '3000')
+const ELEVENLABS_MODEL_ID = 'scribe_v2'
+const HEALTH_PORT = 3000
 
 const bot = new Bot(token)
 
@@ -75,6 +75,14 @@ bot.catch(err => console.error('bot error', err))
 async function main() {
   if (!ELEVENLABS_API_KEY)
     throw new Error('Missing ELEVENLABS_API_KEY')
+
+  await bot.api.setMyCommands([
+    { command: 'start', description: 'Welcome message' },
+    { command: 'help', description: 'How to use this bot' },
+    { command: 'stats', description: 'Show transcription stats' },
+  ]).catch((error) => {
+    console.warn('setMyCommands failed', error)
+  })
 
   const server = Bun.serve({
     port: HEALTH_PORT,

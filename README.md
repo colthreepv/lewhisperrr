@@ -15,7 +15,7 @@ Uses ElevenLabs Speech-to-Text (Scribe v2) for fast, high-accuracy transcription
 - Voice message ingestion + transcription
 - OGG → WAV conversion via `ffmpeg`
 - In-memory job queue with CPU-friendly concurrency
-- Safe limits (duration + file size)
+- Safe limit (file size)
 - Stats summary via `/stats`
 - Docker Compose deployment with cached models
 
@@ -56,23 +56,13 @@ Create `.env` (not committed):
 ### Bot
 - `TELEGRAM_BOT_TOKEN` — required
 - `ELEVENLABS_API_KEY` — required
-- `ELEVENLABS_MODEL_ID` — default `scribe_v2`
-- `ELEVENLABS_TIMESTAMPS_GRANULARITY` — default `none` (`none|word|character`)
-- `ELEVENLABS_TAG_AUDIO_EVENTS` — default `false`
-- `ELEVENLABS_DIARIZE` — default `false`
-- `ELEVENLABS_NUM_SPEAKERS` — optional
-- `MAX_AUDIO_SECONDS` — optional; unset = no limit; set seconds to cap
-- `MAX_FILE_MB` — default `20`
-- `LANGUAGE_HINT` — optional (empty = auto-detect)
-- `CONCURRENCY` — default `1`
-- `MAX_QUEUE` — default `20`
-- `ELEVENLABS_TIMEOUT_MS` — default `120000` (minimum/base timeout for ASR requests)
-- `TELEGRAM_DOWNLOAD_TIMEOUT_MS` — default `120000` (minimum/base timeout for Telegram file download)
-- `ASR_TIMEOUT_MAX_MS` — default `1800000` (cap for duration-aware ASR timeout)
-- `DOWNLOAD_TIMEOUT_MAX_MS` — default `600000` (cap for size-aware download timeout)
-- `ELEVENLABS_RETRIES` — default `2`
-- `HEALTH_PORT` — default `3000`
-- `STATS_PATH` — default `/data/stats.json` (persist if volume mounted)
+
+Everything else is intentionally fixed in code:
+- Model: `scribe_v2`
+- Health port: `3000`
+- Stats path: `/data/stats.json`
+- Queue defaults: concurrency `1`, max queue `20`
+- Max input size: `20MB`
 
 ## Container images
 
@@ -86,18 +76,6 @@ Create `.env` (not committed):
 ```env
 TELEGRAM_BOT_TOKEN=123:abc
 ELEVENLABS_API_KEY=...your key...
-ELEVENLABS_MODEL_ID=scribe_v2
-LANGUAGE_HINT=it
-# MAX_AUDIO_SECONDS=7200
-MAX_FILE_MB=20
-CONCURRENCY=1
-MAX_QUEUE=20
-ELEVENLABS_TIMEOUT_MS=120000
-TELEGRAM_DOWNLOAD_TIMEOUT_MS=120000
-ASR_TIMEOUT_MAX_MS=1800000
-DOWNLOAD_TIMEOUT_MAX_MS=600000
-ELEVENLABS_RETRIES=2
-HEALTH_PORT=3000
 ```
 
 3) Run:
@@ -107,7 +85,7 @@ docker compose up -d --build
 docker compose logs -f bot
 ```
 
-Stats are stored at `STATS_PATH` (default `/data/stats.json`). Mount `bot-stats` to persist across restarts.
+Stats are stored at `/data/stats.json`. Mount `bot-stats` to persist across restarts.
 
 ## Bot commands
 

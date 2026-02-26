@@ -1,7 +1,5 @@
-import process from 'node:process'
-
-const concurrency = Number(process.env.CONCURRENCY ?? '1')
-const maxQueue = Number(process.env.MAX_QUEUE ?? '20')
+const concurrency = 1
+const maxQueue = 20
 
 let running = 0
 const q: Array<() => Promise<void>> = []
